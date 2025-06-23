@@ -23,6 +23,7 @@ public class AdminGUI extends JFrame {
         panel.add(new JScrollPane(reportArea));
         getContentPane().add(panel);
 
+
         refreshButton.addActionListener(e -> {
             try {
                 String report = service.generateReport();
