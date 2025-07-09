@@ -49,7 +49,7 @@ public class CustomerGUI extends JFrame {
   }
 
   private void loadDrinksFromDatabase() {
-    try (Connection conn = DriverManager.getConnection("jdbc:mysql://localhost:3306/drinks", "root", "")) {
+    try (Connection conn = DriverManager.getConnection("jdbc:mysql://10.116.116.133:3306/drinks", "root", "")) {
       String sql = "SELECT drink_id, name, prices FROM drinks";
       PreparedStatement stmt = conn.prepareStatement(sql);
       ResultSet rs = stmt.executeQuery();
@@ -67,7 +67,7 @@ public class CustomerGUI extends JFrame {
   }
 
   private void loadBranchesFromDatabase() {
-    try (Connection conn = DriverManager.getConnection("jdbc:mysql://localhost:3306/drinks", "root", "")) {
+    try (Connection conn = DriverManager.getConnection("jdbc:mysql://10.116.116.133:3306/drinks", "root", "")) {
       String sql = "SELECT branch_id, name FROM branches";
       PreparedStatement stmt = conn.prepareStatement(sql);
       ResultSet rs = stmt.executeQuery();
@@ -90,22 +90,64 @@ public class CustomerGUI extends JFrame {
       int drinkId = drinkIds.get(selectedDrink);
       int branchId = branchIds.get(selectedBranch);
 
+      // Check stock before placing the order
+      int currentStock = getCurrentStock(drinkId, branchId);
+
+      if (currentStock < quantity) {
+        JOptionPane.showMessageDialog(this,
+          "Not enough stock available.\nCurrent stock: " + currentStock,
+          "Stock Alert", JOptionPane.WARNING_MESSAGE);
+        return;
+      }
+
+      // Restock alert if stock after order would be too low
+      if (currentStock - quantity <= 5) {
+        int confirm = JOptionPane.showConfirmDialog(this,
+          "Warning: Stock will be low after this order (" + (currentStock - quantity) + " left).\nDo you still want to proceed?",
+          "Restock Alert", JOptionPane.YES_NO_OPTION);
+
+        if (confirm != JOptionPane.YES_OPTION) {
+          return;
+        }
+      }
+
+      // Proceed to place order via RMI
       OrderItem item = new OrderItem(drinkId, quantity);
       List<OrderItem> items = new ArrayList<>();
       items.add(item);
 
-      Registry registry = LocateRegistry.getRegistry("localhost", 1099);
+      Registry registry = LocateRegistry.getRegistry("10.116.116.133", 1099);
       OrderingService service = (OrderingService) registry.lookup("OrderService");
 
       int customerId = 1; // Set dynamically or hardcode for now
       String response = service.placeOrder(customerId, branchId, items);
       outputArea.setText(response);
 
+    } catch (NumberFormatException nfe) {
+      JOptionPane.showMessageDialog(this, "Please enter a valid quantity.");
     } catch (Exception e) {
       e.printStackTrace();
       outputArea.setText("Error: " + e.getMessage());
     }
   }
+
+  private int getCurrentStock(int drinkId, int branchId) {
+    int stock = 0;
+    try (Connection conn = DriverManager.getConnection("jdbc:mysql://10.116.116.133:3306/drinks", "root", "")) {
+      String sql = "SELECT quantity FROM stock WHERE drink_id = ? AND branch_id = ?";
+      PreparedStatement stmt = conn.prepareStatement(sql);
+      stmt.setInt(1, drinkId);
+      stmt.setInt(2, branchId);
+      ResultSet rs = stmt.executeQuery();
+      if (rs.next()) {
+        stock = rs.getInt("quantity");
+      }
+    } catch (SQLException e) {
+      JOptionPane.showMessageDialog(this, "Failed to check stock.\n" + e.getMessage());
+    }
+    return stock;
+  }
+
 
   public static void main(String[] args) {
     SwingUtilities.invokeLater(CustomerGUI::new);

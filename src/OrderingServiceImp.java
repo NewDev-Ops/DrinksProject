@@ -69,37 +69,64 @@ public class OrderingServiceImp extends UnicastRemoteObject implements OrderingS
 
     }
 
-    public String generateReport() throws RemoteException {
-        StringBuilder sb = new StringBuilder(); // Report variable
-        try (Connection conn = DatabaseConnection.getConnection()) {
-            Statement stmt = conn.createStatement();
-            ResultSet results = stmt.executeQuery(
-                    "SELECT b.name AS branch, SUM(od.subtotal) AS total_sales " +
-                            "FROM Order_Details od " +
-                            "JOIN Orders o ON od.order_id = o.order_id " +
-                            "JOIN Branches b ON o.branch_id = b.branch_id " +
-                            "GROUP BY b.branch_id");
+  public String generateReport() throws RemoteException {
+    StringBuilder sb = new StringBuilder();
+    try (Connection conn = DatabaseConnection.getConnection()) {
 
-            sb.append("Sales by Branch:\n");  // ✅ Add newline
 
-            double totalSales = 0;
-            while (results.next()) {
-                sb.append(results.getString("branch"))
-                        .append(": Kes ")
-                        .append(results.getDouble("total_sales"))
-                        .append("\n");  // ✅ Add newline per branch
-                totalSales += results.getDouble("total_sales");
-            }
+      sb.append("=== Sales by Branch ===\n");
+      Statement stmt1 = conn.createStatement();
+      ResultSet rs1 = stmt1.executeQuery(
+        "SELECT b.name AS branch, SUM(od.subtotal) AS total_sales " +
+          "FROM Order_Details od " +
+          "JOIN Orders o ON od.order_id = o.order_id " +
+          "JOIN Branches b ON o.branch_id = b.branch_id " +
+          "GROUP BY b.name"
+      );
+      while (rs1.next()) {
+        sb.append(rs1.getString("branch")).append(": Kes ")
+          .append(rs1.getDouble("total_sales")).append("\n");
+      }
 
-            sb.append("The total amount of sales: Kes ")
-                    .append(totalSales)
-                    .append("\n");  // ✅ Final newline
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "Error generating report: " + e.getMessage();
-        }
 
-        return sb.toString();
+      sb.append("\n=== Remaining Stock ===\n");
+      Statement stmt2 = conn.createStatement();
+      ResultSet rs2 = stmt2.executeQuery(
+        "SELECT b.name AS branch, d.name AS drink, s.quantity " +
+          "FROM Stock s " +
+          "JOIN Branches b ON s.branch_id = b.branch_id " +
+          "JOIN Drinks d ON s.drink_id = d.drink_id " +
+          "ORDER BY b.name"
+      );
+      while (rs2.next()) {
+        sb.append(rs2.getString("branch")).append(" - ")
+          .append(rs2.getString("drink")).append(": ")
+          .append(rs2.getInt("quantity")).append("\n");
+      }
+
+      sb.append("\n=== Customer Purchases ===\n");
+      Statement stmt3 = conn.createStatement();
+      ResultSet rs3 = stmt3.executeQuery(
+        "SELECT c.name AS customer, b.name AS branch, d.name AS drink, od.quantity " +
+          "FROM Order_Details od " +
+          "JOIN Orders o ON od.order_id = o.order_id " +
+          "JOIN Customers c ON o.customer_id = c.customer_id " +
+          "JOIN Branches b ON o.branch_id = b.branch_id " +
+          "JOIN Drinks d ON od.drink_id = d.drink_id " +
+          "ORDER BY customer"
+      );
+      while (rs3.next()) {
+        sb.append(rs3.getString("customer")).append(" bought ")
+          .append(rs3.getInt("quantity")).append(" of ")
+          .append(rs3.getString("drink")).append(" from ")
+          .append(rs3.getString("branch")).append("\n");
+      }
+
+    } catch (Exception e) {
+      e.printStackTrace();
+      return "Error generating report: " + e.getMessage();
     }
+    return sb.toString();
+  }
 
 }

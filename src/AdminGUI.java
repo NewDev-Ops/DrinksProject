@@ -30,7 +30,7 @@ public class AdminGUI extends JFrame {
     branchCombo = new JComboBox<>();
     drinkCombo = new JComboBox<>();
     quantityField = new JTextField(5);
-    updateStockButton = new JButton("Update Stock");
+    updateStockButton = new JButton("Restock");
 
     JPanel panel = new JPanel();
     panel.setLayout(new FlowLayout());
@@ -47,6 +47,7 @@ public class AdminGUI extends JFrame {
 
     getContentPane().add(panel);
 
+    // Fetch report from RMI
     refreshButton.addActionListener(e -> {
       try {
         String report = service.generateReport();
@@ -56,32 +57,84 @@ public class AdminGUI extends JFrame {
       }
     });
 
+    // Handle restocking logic
     updateStockButton.addActionListener(e -> {
       try {
-        int branchId = branchIds.get((String) branchCombo.getSelectedItem());
-        int drinkId = drinkIds.get((String) drinkCombo.getSelectedItem());
+        String selectedBranch = (String) branchCombo.getSelectedItem();
+        String selectedDrink = (String) drinkCombo.getSelectedItem();
         int quantity = Integer.parseInt(quantityField.getText());
 
+        int branchId = branchIds.get(selectedBranch);
+        int drinkId = drinkIds.get(selectedDrink);
+
         try (Connection conn = DatabaseConnection.getConnection()) {
-          PreparedStatement stmt = conn.prepareStatement(
+          conn.setAutoCommit(false);
+
+          // If restocking Nairobi directly (HQ)
+          if (selectedBranch.equalsIgnoreCase("NAIROBI")) {
+            PreparedStatement restockHQ = conn.prepareStatement(
+              "UPDATE stock SET quantity = quantity + ? WHERE branch_id = ? AND drink_id = ?"
+            );
+            restockHQ.setInt(1, quantity);
+            restockHQ.setInt(2, branchId);
+            restockHQ.setInt(3, drinkId);
+            int rows = restockHQ.executeUpdate();
+
+            if (rows > 0) {
+              conn.commit();
+              JOptionPane.showMessageDialog(this, "Nairobi restocked successfully.");
+            } else {
+              JOptionPane.showMessageDialog(this, "Failed to restock Nairobi.");
+            }
+            return;
+          }
+
+          // Else: transfer from Nairobi to branch
+          PreparedStatement checkHQ = conn.prepareStatement(
+            "SELECT quantity FROM stock WHERE branch_id = (SELECT branch_id FROM branches WHERE name = 'NAIROBI') AND drink_id = ?"
+          );
+          checkHQ.setInt(1, drinkId);
+          ResultSet rs = checkHQ.executeQuery();
+
+          if (!rs.next() || rs.getInt("quantity") < quantity) {
+            JOptionPane.showMessageDialog(this, "Not enough stock in HQ (Nairobi).");
+            return;
+          }
+
+          // Deduct from HQ
+          PreparedStatement deductHQ = conn.prepareStatement(
+            "UPDATE stock SET quantity = quantity - ? WHERE branch_id = (SELECT branch_id FROM branches WHERE name = 'NAIROBI') AND drink_id = ?"
+          );
+          deductHQ.setInt(1, quantity);
+          deductHQ.setInt(2, drinkId);
+          deductHQ.executeUpdate();
+
+          // Add to selected branch
+          PreparedStatement addToBranch = conn.prepareStatement(
             "UPDATE stock SET quantity = quantity + ? WHERE branch_id = ? AND drink_id = ?"
           );
-          stmt.setInt(1, quantity);
-          stmt.setInt(2, branchId);
-          stmt.setInt(3, drinkId);
-          int rows = stmt.executeUpdate();
+          addToBranch.setInt(1, quantity);
+          addToBranch.setInt(2, branchId);
+          addToBranch.setInt(3, drinkId);
+          int rows = addToBranch.executeUpdate();
+
+          conn.commit();
+
           if (rows > 0) {
-            JOptionPane.showMessageDialog(this, "Stock updated successfully.");
+            JOptionPane.showMessageDialog(this, "Stock transferred from Nairobi to " + selectedBranch + " successfully.");
           } else {
-            JOptionPane.showMessageDialog(this, "Stock update failed or entry not found.");
+            JOptionPane.showMessageDialog(this, "Failed to update stock in branch.");
           }
+
         }
 
       } catch (Exception ex) {
+        ex.printStackTrace();
         JOptionPane.showMessageDialog(this, "Error: " + ex.getMessage());
       }
     });
 
+    // Connect to RMI server
     try {
       Registry registry = LocateRegistry.getRegistry("localhost", 1099);
       service = (OrderingService) registry.lookup("OrderService");
